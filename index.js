@@ -14,7 +14,7 @@ app.get("/", (req, res) => {
 });
 
 // Routes setup
-app.use("/api/ytmusic", require("./routes/ytmusic"));
+app.use("/api/ytmusic", require("./routes/ytmusic-search"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
