@@ -14,6 +14,85 @@ async function getYTMusic() {
 }
 
 // ─────────────────────────────────────────────
+// GET /api/ytmusic/ — Available Endpoints
+// ─────────────────────────────────────────────
+router.get("/", (req, res) => {
+    const base = `${req.protocol}://${req.get("host")}/api/ytmusic`;
+
+    res.json({
+        status: true,
+        message: "YouTube Music API by Adi.0X",
+        base_url: base,
+        endpoints: [
+            {
+                name: "Search Songs",
+                method: "GET",
+                endpoint: "/search",
+                params: [
+                    { name: "q", type: "string", required: true, description: "Search query" },
+                    { name: "limit", type: "number", required: false, description: "Max results (default: 10)" }
+                ],
+                example: `${base}/search?q=co2&limit=5`
+            },
+            {
+                name: "Get Song Details",
+                method: "GET",
+                endpoint: "/song",
+                params: [
+                    { name: "id", type: "string", required: true, description: "YouTube video ID" }
+                ],
+                example: `${base}/song?id=6FewJvQDTmA`
+            },
+            {
+                name: "Get Artist Details",
+                method: "GET",
+                endpoint: "/artist",
+                params: [
+                    { name: "id", type: "string", required: true, description: "YouTube Music artist ID" }
+                ],
+                example: `${base}/artist?id=UCO_sphdxl8_K6mfXzzmkDGQ`
+            },
+            {
+                name: "Get Album Details",
+                method: "GET",
+                endpoint: "/album",
+                params: [
+                    { name: "id", type: "string", required: true, description: "YouTube Music album ID" }
+                ],
+                example: `${base}/album?id=MPREb_BF7bztcDvJi`
+            },
+            {
+                name: "Get Playlist Details",
+                method: "GET",
+                endpoint: "/playlist",
+                params: [
+                    { name: "id", type: "string", required: true, description: "YouTube Music playlist ID" }
+                ],
+                example: `${base}/playlist?id=PLxxx`
+            },
+            {
+                name: "Get Lyrics",
+                method: "GET",
+                endpoint: "/lyrics",
+                params: [
+                    { name: "id", type: "string", required: true, description: "YouTube video ID" }
+                ],
+                example: `${base}/lyrics?id=6FewJvQDTmA`
+            },
+            {
+                name: "Search Suggestions",
+                method: "GET",
+                endpoint: "/suggestions",
+                params: [
+                    { name: "q", type: "string", required: true, description: "Partial search query" }
+                ],
+                example: `${base}/suggestions?q=co`
+            }
+        ]
+    });
+});
+
+// ─────────────────────────────────────────────
 // GET /api/ytmusic/search?q=co2&limit=10
 // ─────────────────────────────────────────────
 router.get("/search", async (req, res) => {
