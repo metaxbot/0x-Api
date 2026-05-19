@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const axios = require("axios");
+const cheerio = require("cheerio");
 
 const ACCESS_TOKEN = "6628568379|c1e620fa708a1d5696fb991c1bde5662";
 
@@ -22,6 +24,15 @@ const USER_AGENTS = [
 
 function randomUA() {
     return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+// ইউটিলিটি: Facebook-এর ইউনিকোড এনকোডেড URL ডিকোড
+function decodeFBUrl(url) {
+    let res = url.replace(/\\/g, '');
+    try {
+        res = JSON.parse(`"${res}"`);
+    } catch (e) {}
+    return res;
 }
 
 // ─────────────────────────────────────────────
@@ -118,6 +129,13 @@ router.get("/", (req, res) => {
                 endpoint: "/pp",
                 params: [{ name: "uid", type: "string", required: true, description: "Facebook User ID" }],
                 example: `${base}/pp?uid=4`
+            },
+            {
+                name: "Facebook Media Downloader",
+                method: "GET",
+                endpoint: "/dl",
+                params: [{ name: "url", type: "string", required: true, description: "Facebook post/video/reel URL" }],
+                example: `${base}/dl?url=https://www.facebook.com/share/v/1DvWuPF4GX/`
             }
         ]
     });
@@ -193,6 +211,63 @@ router.get("/pp", async (req, res) => {
         return res.status(500).json({
             status: false,
             error: err.message
+        });
+    }
+});
+
+// ─────────────────────────────────────────────
+// GET /api/fb/dl?url=
+// ─────────────────────────────────────────────
+router.get("/dl", async (req, res) => {
+    let videoUrl = req.query.url;
+    if (!videoUrl) return res.status(400).json({ status: false, message: "URL required" });
+
+    try {
+        const { data: html } = await axios.get(videoUrl, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "sec-fetch-dest": "document",
+                "sec-fetch-mode": "navigate",
+                "sec-fetch-site": "none"
+            }
+        });
+
+        const $ = cheerio.load(html);
+        const title = $('meta[property="og:description"]').attr('content') || $('meta[property="og:title"]').attr('content') || $('title').text();
+        const thumbnail = ($('meta[property="og:image"]').attr('content') || "").replace(/&amp;/g, '&');
+        const sdMatch = html.match(/"browser_native_sd_url":"(.*?)"/) || html.match(/sd_src_no_ratelimit:"(.*?)"/);
+        const hdMatch = html.match(/"browser_native_hd_url":"(.*?)"/) || html.match(/hd_src_no_ratelimit:"(.*?)"/);
+        const playableMatch = html.match(/"playable_url":"(.*?)"/);
+        const qualityMatch = html.match(/"playable_url_quality_hd":"(.*?)"/);
+
+        const links = [];
+
+        if (hdMatch) links.push({ quality: "HD", url: decodeFBUrl(hdMatch[1]) });
+        if (qualityMatch) links.push({ quality: "HD (Reel)", url: decodeFBUrl(qualityMatch[1]) });
+        if (sdMatch) links.push({ quality: "SD", url: decodeFBUrl(sdMatch[1]) });
+        if (playableMatch && links.length === 0) links.push({ quality: "SD", url: decodeFBUrl(playableMatch[1]) });
+
+        if (links.length === 0) {
+            const videoSrc = $('video').attr('src');
+            if (videoSrc) links.push({ quality: "Normal", url: videoSrc });
+        }
+
+        res.json({
+            status: true,
+            creator: "Adi.0X",
+            data: {
+                title,
+                thumbnail,
+                links
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            status: false,
+            message: "Failed to fetch data.",
+            error: error.message
         });
     }
 });
