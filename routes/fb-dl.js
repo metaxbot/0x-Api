@@ -3,84 +3,68 @@ const router = express.Router();
 const axios = require("axios");
 const cheerio = require("cheerio");
 
-router.get("/dl", async (req, res) => {
-    const videoUrl = req.query.url;
+// ইউটিলিটি: Facebook-এর ইউনিকোড এনকোডেড URL ডিকোড
+function decodeFBUrl(url) {
+    let res = url.replace(/\\/g, '');
+    try {
+        res = JSON.parse(`"${res}"`);
+    } catch (e) {}
+    return res;
+}
 
-    if (!videoUrl) {
-        return res.status(400).json({
-            status: false,
-            message: "Please provide a Facebook Video/Reel URL in the 'url' parameter."
-        });
-    }
+router.get("/dl", async (req, res) => {
+    let videoUrl = req.query.url;
+    if (!videoUrl) return res.status(400).json({ status: false, message: "URL required" });
 
     try {
-        // Facebook theke raw HTML fetch kora
-        const { data } = await axios.get(videoUrl, {
+        const { data: html } = await axios.get(videoUrl, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
-                'Accept-Language': 'en-US,en;q=0.9'
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "sec-fetch-dest": "document",
+                "sec-fetch-mode": "navigate",
+                "sec-fetch-site": "none"
             }
         });
 
-        const $ = cheerio.load(data);
+        // cheerio দিয়ে মেটা ট্যাগ পার্স (টাইটেল ও থাম্বনেইল)
+        const $ = cheerio.load(html);
+        const title = $('meta[property="og:title"]').attr('content') || $('title').text() || "Facebook Video";
+        const thumbnail = ($('meta[property="og:image"]').attr('content') || "").replace(/&amp;/g, '&');
 
-        // ১. Metadata Extraction (Title, Page Name, Thumbnail)
-        const ogTitle = $('meta[property="og:title"]').attr('content') || "";
-        const ogImage = $('meta[property="og:image"]').attr('content') || "";
-        
-        // Title ar Page Name split kora (FB format: Title | PageName)
-        let title = ogTitle;
-        let pageName = "Unknown Page";
-        
-        if (ogTitle.includes('|')) {
-            const parts = ogTitle.split('|');
-            title = parts[0].trim();
-            pageName = parts[1].trim();
+        // সব সম্ভাব্য ভিডিও কী থেকে লিংক বের করা (first script থেকে নেওয়া)
+        const sdMatch = html.match(/"browser_native_sd_url":"(.*?)"/) || html.match(/sd_src_no_ratelimit:"(.*?)"/);
+        const hdMatch = html.match(/"browser_native_hd_url":"(.*?)"/) || html.match(/hd_src_no_ratelimit:"(.*?)"/);
+        const playableMatch = html.match(/"playable_url":"(.*?)"/);
+        const qualityMatch = html.match(/"playable_url_quality_hd":"(.*?)"/);
+
+        const links = [];
+
+        if (hdMatch) links.push({ quality: "HD", url: decodeFBUrl(hdMatch[1]) });
+        if (qualityMatch) links.push({ quality: "HD (Reel)", url: decodeFBUrl(qualityMatch[1]) });
+        if (sdMatch) links.push({ quality: "SD", url: decodeFBUrl(sdMatch[1]) });
+        if (playableMatch && links.length === 0) links.push({ quality: "SD", url: decodeFBUrl(playableMatch[1]) });
+
+        // ফ্যালব্যাক: ভিডিও ট্যাগ থেকে src (যদি উপরের কোনোটাই না পায়)
+        if (links.length === 0) {
+            const videoSrc = $('video').attr('src');
+            if (videoSrc) links.push({ quality: "Normal", url: videoSrc });
         }
 
-        // ২. Video ID extract kora URL theke
-        const idMatch = videoUrl.match(/(?:videos|reel|reels|watch)\/(\d+)/);
-        const videoId = idMatch ? idMatch[1] : "N/A";
-
-        // ৩. Quality Links Extraction (Regex logic)
-        // Facebook HTML e eita "browser_native_sd_url" name e thake
-        const sdMatch = data.match(/"browser_native_sd_url":"(.*?)"/);
-        const hdMatch = data.match(/"browser_native_hd_url":"(.*?)"/);
-
-        let downloadLinks = [];
-        
-        if (sdMatch && sdMatch[1]) {
-            downloadLinks.push({
-                quality: "SD",
-                url: sdMatch[1].replace(/\\/g, '') // Backslash remove korar jonno
-            });
-        }
-        
-        if (hdMatch && hdMatch[1]) {
-            downloadLinks.push({
-                quality: "HD",
-                url: hdMatch[1].replace(/\\/g, '')
-            });
-        }
-
-        // Response pathano
         res.json({
             status: true,
             data: {
-                id: videoId,
-                page_name: pageName,
-                title: title,
-                thumbnail: ogImage,
-                links: downloadLinks
+                title,
+                thumbnail,
+                links
             },
             author: "Adi.0X"
         });
 
     } catch (error) {
-        console.error("Scraping Error:", error.message);
         res.status(500).json({
             status: false,
-            message: "Failed to scrap video info. Facebook might be blocking the request.",
+            message: "Failed to fetch video data.",
             error: error.message
         });
     }
