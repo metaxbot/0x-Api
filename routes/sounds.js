@@ -7,7 +7,7 @@ const BASE_API = "https://www.myinstants.com/api/v1/instants/";
 // GET /api/instants/
 // ─────────────────────────────────────────────
 router.get("/", (req, res) => {
-    const base = `${req.protocol}://${req.get("host")}/api/instants`;
+    const base = `${req.protocol}://${req.get("host")}/api/sounds`;
     res.json({
         status: true,
         message: "Sounds API by Adi.0X",
