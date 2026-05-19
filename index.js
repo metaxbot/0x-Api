@@ -16,8 +16,6 @@ app.get("/", (req, res) => {
 // Routes setup
 app.use("/api/ytmusic", require("./routes/ytmusic-search"));
 app.use("/api/fb", require("./routes/fb-inf"));
-app.use("/api/fbx", require("./routes/fbx"));
-app.use("/api/fb", require("./routes/fb-dl"));
 app.use("/api/sounds", require("./routes/sounds"));
 
 const PORT = process.env.PORT || 3000;
