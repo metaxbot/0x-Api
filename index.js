@@ -17,6 +17,7 @@ app.get("/", (req, res) => {
 app.use("/api/ytmusic", require("./routes/ytmusic-search"));
 app.use("/api/fb", require("./routes/fb-inf"));
 app.use("/api/sounds", require("./routes/sounds"));
+app.use("/api/pinterest", require("./routes/pinterest"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
