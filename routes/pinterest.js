@@ -1,9 +1,10 @@
 const express = require("express");
 const router = express.Router();
-const puppeteer = require("puppeteer");
 
 // ================================================================
-//  Pinterest Search API — Puppeteer (Real Browser)
+//  Pinterest Search API — No Puppeteer (Render Compatible)
+//  npm install node-fetch@2   (অথবা built-in fetch যদি Node 18+)
+//
 //  Routes:
 //    GET /api/pinterest/pins?q=cat&limit=10
 //    GET /api/pinterest/videos?q=cat&limit=10
@@ -11,105 +12,76 @@ const puppeteer = require("puppeteer");
 //    GET /api/pinterest/boards?q=cat&limit=10
 // ================================================================
 
-// Browser instance reuse করা — প্রতি request এ নতুন browser না খুলে
-let browserInstance = null;
-
-async function getBrowser() {
-    if (browserInstance && browserInstance.isConnected()) return browserInstance;
-    browserInstance = await puppeteer.launch({
-        headless: "new",
-        args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-blink-features=AutomationControlled", // bot detection bypass
-            "--disable-infobars",
-            "--window-size=1280,800",
-        ],
+// ──────────────────────────────────────────────
+//  Step 1: Pinterest থেকে csrftoken নেওয়া
+// ──────────────────────────────────────────────
+async function getCsrfToken() {
+    const res = await fetch("https://www.pinterest.com/", {
+        headers: {
+            "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        redirect: "follow",
     });
-    return browserInstance;
+
+    // Set-Cookie হেডার থেকে csrftoken বের করা
+    const rawCookies = res.headers.get("set-cookie") || "";
+    const match = rawCookies.match(/csrftoken=([^;]+)/);
+    const csrftoken = match ? match[1] : "f_auto-default-token";
+
+    // সব cookies একসাথে নেওয়া
+    const allCookies = rawCookies
+        .split(/,(?=\s*\w+=)/)
+        .map((c) => c.split(";")[0].trim())
+        .join("; ");
+
+    return { csrftoken, allCookies };
 }
 
 // ──────────────────────────────────────────────
-//  Pinterest intercept করে API response নেওয়া
+//  Step 2: Pinterest Search API call
 // ──────────────────────────────────────────────
-async function scrapeWithBrowser(scope, query, limit = 10) {
-    const browser = await getBrowser();
-    const page = await browser.newPage();
+async function searchPinterest(scope, query, limit = 10) {
+    const { csrftoken, allCookies } = await getCsrfToken();
 
-    try {
-        // Bot detection bypass
-        await page.evaluateOnNewDocument(() => {
-            Object.defineProperty(navigator, "webdriver", { get: () => false });
-            window.chrome = { runtime: {} };
-        });
+    const options = {
+        query,
+        scope,
+        page_size: Math.min(limit, 50),
+        redux_normalize_feed: true,
+    };
 
-        await page.setUserAgent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        );
-        await page.setViewport({ width: 1280, height: 800 });
+    const params = new URLSearchParams({
+        source_url: `/search/${scope}/?q=${encodeURIComponent(query)}`,
+        data: JSON.stringify({ options, context: {} }),
+        _: Date.now().toString(),
+    });
 
-        // Pinterest API response intercept করা
-        const collectedData = [];
+    const apiUrl = `https://www.pinterest.com/resource/BaseSearchResource/get/?${params}`;
 
-        page.on("response", async (response) => {
-            const url = response.url();
-            // Pinterest এর BaseSearchResource API response ধরা
-            if (url.includes("BaseSearchResource") || url.includes("/resource/") && url.includes("Search")) {
-                try {
-                    const json = await response.json();
-                    const items = json?.resource_response?.data;
-                    if (Array.isArray(items)) {
-                        collectedData.push(...items);
-                    }
-                } catch (_) {}
-            }
-        });
+    const res = await fetch(apiUrl, {
+        headers: {
+            "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            Accept: "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "en-US,en;q=0.9",
+            Referer: `https://www.pinterest.com/search/${scope}/?q=${encodeURIComponent(query)}`,
+            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRFToken": csrftoken,
+            "X-APP-VERSION": "8f2de85",
+            "X-Pinterest-AppState": "active",
+            Cookie: allCookies || `csrftoken=${csrftoken}`,
+        },
+    });
 
-        // Pinterest সার্চ পেজে যাওয়া
-        const searchUrl = `https://www.pinterest.com/search/${scope}/?q=${encodeURIComponent(query)}`;
-        await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 30000 });
-
-        // পেজ লোড হওয়ার জন্য একটু অপেক্ষা
-        await new Promise((r) => setTimeout(r, 3000));
-
-        // যদি intercept এ কিছু না পাওয়া যায়, DOM থেকে নেওয়া
-        if (collectedData.length === 0) {
-            const domData = await page.evaluate(() => {
-                // Redux state থেকে
-                const reduxEl = document.querySelector("[data-redux-store]");
-                if (reduxEl) {
-                    try { return JSON.parse(reduxEl.getAttribute("data-redux-store")); } catch (_) {}
-                }
-                // __PWS_DATA__ script tag থেকে
-                const scripts = Array.from(document.querySelectorAll("script"));
-                for (const s of scripts) {
-                    if (s.id === "__PWS_DATA__" || s.textContent.includes("__initialReduxState__")) {
-                        try {
-                            const match = s.textContent.match(/window\.__initialReduxState__\s*=\s*({.+?});/s);
-                            if (match) return JSON.parse(match[1]);
-                        } catch (_) {}
-                    }
-                }
-                return null;
-            });
-
-            if (domData) {
-                // Redux resources থেকে data বের করা
-                const resources = domData?.resources || {};
-                for (const key of Object.keys(resources)) {
-                    const res = resources[key];
-                    if (res?.status === "success" && Array.isArray(res?.data)) {
-                        collectedData.push(...res.data);
-                    }
-                }
-            }
-        }
-
-        return collectedData.slice(0, limit);
-
-    } finally {
-        await page.close();
+    if (!res.ok) {
+        throw new Error(`Pinterest responded with ${res.status} — ${res.statusText}`);
     }
+
+    const json = await res.json();
+    return json?.resource_response?.data || [];
 }
 
 // ──────────────────────────────────────────────
@@ -117,35 +89,43 @@ async function scrapeWithBrowser(scope, query, limit = 10) {
 // ──────────────────────────────────────────────
 function parsePin(pin) {
     if (!pin?.id) return null;
-    const images = pin.images || {};
-    const img = images["736x"]?.url || images["564x"]?.url || images["236x"]?.url || null;
+    const img = pin.images;
     return {
         id: pin.id,
         title: pin.title || pin.grid_title || null,
         description: pin.description || null,
         url: `https://www.pinterest.com/pin/${pin.id}/`,
-        image: img,
+        image:
+            img?.["736x"]?.url || img?.["564x"]?.url || img?.["236x"]?.url || null,
         dominant_color: pin.dominant_color || null,
         saves: pin.repin_count ?? 0,
         comments: pin.comment_count ?? 0,
         created_at: pin.created_at || null,
-        pinner: pin.pinner ? {
-            username: pin.pinner.username,
-            full_name: pin.pinner.full_name || null,
-            profile_url: `https://www.pinterest.com/${pin.pinner.username}/`,
-            avatar: pin.pinner.image_medium_url || null,
-        } : null,
-        board: pin.board ? {
-            name: pin.board.name,
-            url: `https://www.pinterest.com${pin.board.url}`,
-        } : null,
+        pinner: pin.pinner
+            ? {
+                  username: pin.pinner.username,
+                  full_name: pin.pinner.full_name || null,
+                  profile_url: `https://www.pinterest.com/${pin.pinner.username}/`,
+                  avatar: pin.pinner.image_medium_url || null,
+                  followers: pin.pinner.follower_count ?? 0,
+              }
+            : null,
+        board: pin.board
+            ? {
+                  name: pin.board.name,
+                  url: `https://www.pinterest.com${pin.board.url}`,
+              }
+            : null,
     };
 }
 
 function parseVideo(pin) {
     if (!pin?.id) return null;
-    const formats = Object.values(pin.videos?.video_list || {}).filter((v) => v?.url);
-    const best = formats.sort((a, b) => (b.width || 0) - (a.width || 0))[0] || null;
+    const formats = Object.values(pin.videos?.video_list || {}).filter(
+        (v) => v?.url
+    );
+    const best =
+        formats.sort((a, b) => (b.width || 0) - (a.width || 0))[0] || null;
     return {
         id: pin.id,
         title: pin.title || pin.grid_title || null,
@@ -157,12 +137,14 @@ function parseVideo(pin) {
         video_height: best?.height || null,
         duration_ms: pin.videos?.duration || null,
         saves: pin.repin_count ?? 0,
-        pinner: pin.pinner ? {
-            username: pin.pinner.username,
-            full_name: pin.pinner.full_name || null,
-            profile_url: `https://www.pinterest.com/${pin.pinner.username}/`,
-            avatar: pin.pinner.image_medium_url || null,
-        } : null,
+        pinner: pin.pinner
+            ? {
+                  username: pin.pinner.username,
+                  full_name: pin.pinner.full_name || null,
+                  profile_url: `https://www.pinterest.com/${pin.pinner.username}/`,
+                  avatar: pin.pinner.image_medium_url || null,
+              }
+            : null,
     };
 }
 
@@ -192,22 +174,32 @@ function parseBoard(board) {
         name: board.name,
         description: board.description || null,
         url: `https://www.pinterest.com${board.url}`,
-        cover_image: board.cover_images?.["736x"]?.url || board.cover_pin?.images?.["736x"]?.url || null,
+        cover_image:
+            board.cover_images?.["736x"]?.url ||
+            board.cover_pin?.images?.["736x"]?.url ||
+            null,
         pin_count: board.pin_count ?? 0,
         follower_count: board.follower_count ?? 0,
         privacy: board.privacy || "public",
         category: board.category || null,
         created_at: board.created_at || null,
-        owner: board.owner ? {
-            username: board.owner.username,
-            full_name: board.owner.full_name || null,
-            profile_url: `https://www.pinterest.com/${board.owner.username}/`,
-            avatar: board.owner.image_medium_url || null,
-        } : null,
+        owner: board.owner
+            ? {
+                  username: board.owner.username,
+                  full_name: board.owner.full_name || null,
+                  profile_url: `https://www.pinterest.com/${board.owner.username}/`,
+                  avatar: board.owner.image_medium_url || null,
+              }
+            : null,
     };
 }
 
-const PARSERS = { pins: parsePin, videos: parseVideo, users: parseUser, boards: parseBoard };
+const PARSERS = {
+    pins: parsePin,
+    videos: parseVideo,
+    users: parseUser,
+    boards: parseBoard,
+};
 
 // ──────────────────────────────────────────────
 //  Route factory
@@ -225,8 +217,8 @@ function makeRoute(type) {
         }
 
         try {
-            const raw = await scrapeWithBrowser(type, query, limit);
-            const results = raw.map(PARSERS[type]).filter(Boolean);
+            const raw = await searchPinterest(type, query, limit);
+            const results = raw.map(PARSERS[type]).filter(Boolean).slice(0, limit);
 
             res.json({
                 status: true,
@@ -242,12 +234,12 @@ function makeRoute(type) {
     };
 }
 
+// ──────────────────────────────────────────────
+//  Routes
+// ──────────────────────────────────────────────
 router.get("/pins",   makeRoute("pins"));
 router.get("/videos", makeRoute("videos"));
 router.get("/users",  makeRoute("users"));
 router.get("/boards", makeRoute("boards"));
-
-// Server বন্ধ হলে browser ও বন্ধ করা
-process.on("exit", () => browserInstance?.close());
 
 module.exports = router;
