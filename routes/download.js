@@ -3,21 +3,22 @@ const router = express.Router();
 const axios = require("axios");
 
 // ─────────────────────────────────────────────
-// প্ল্যাটফর্ম ডিটেক্ট করা
+// Platform detection
 // ─────────────────────────────────────────────
 function detectPlatform(url) {
     if (/facebook\.com|fb\.watch|fb\.com/i.test(url)) return "facebook";
     if (/instagram\.com/i.test(url)) return "instagram";
+    if (/tiktok\.com|vm\.tiktok\.com/i.test(url)) return "tiktok";
     return null;
 }
 
 // ─────────────────────────────────────────────
-// Facebook Downloader (ফলব্যাক সহ ৩টা API)
+// Facebook Downloader (3 fallback APIs)
 // ─────────────────────────────────────────────
 async function facebookDownload(url) {
     const encodedUrl = encodeURIComponent(url);
 
-    // API ১: api-faa.my.id
+    // API 1: api-faa.my.id
     try {
         const { data } = await axios.get(
             `https://api-faa.my.id/faa/fbdownload?url=${encodedUrl}`,
@@ -42,7 +43,7 @@ async function facebookDownload(url) {
         }
     } catch (_) {}
 
-    // API ২: api.nexray.eu.cc
+    // API 2: api.nexray.eu.cc
     try {
         const { data } = await axios.get(
             `https://api.nexray.eu.cc/downloader/facebook?url=${encodedUrl}`,
@@ -68,7 +69,7 @@ async function facebookDownload(url) {
         }
     } catch (_) {}
 
-    // API ৩: api.siputzx.my.id
+    // API 3: api.siputzx.my.id
     try {
         const { data } = await axios.get(
             `https://api.siputzx.my.id/api/d/facebook?url=${encodedUrl}`,
@@ -94,15 +95,45 @@ async function facebookDownload(url) {
         }
     } catch (_) {}
 
-    throw new Error("সব Facebook API ফেল করেছে। URL টি সঠিক কিনা চেক করুন।");
+    throw new Error("All Facebook APIs failed. Please check the URL.");
 }
 
 // ─────────────────────────────────────────────
-// Instagram Downloader
+// Instagram Downloader (2 fallback APIs: v2 → v1)
 // ─────────────────────────────────────────────
 async function instagramDownload(url) {
     const encodedUrl = encodeURIComponent(url);
 
+    // API 1 (new v2)
+    try {
+        const { data } = await axios.get(
+            `https://api.nexray.eu.cc/downloader/v2/instagram?url=${encodedUrl}`,
+            { timeout: 10000 }
+        );
+
+        if (data.status && data.result && Array.isArray(data.result.media)) {
+            const mediaArray = data.result.media;
+            const links = mediaArray.map(item => ({
+                quality: item.type === "mp4" ? "Video" : "Image",
+                type: item.type,   // "mp4" or "webp" (or other)
+                thumbnail: data.result.thumbnail || null,
+                url: item.url
+            }));
+
+            return {
+                status: true,
+                creator: "Adi.0X",
+                platform: "instagram",
+                data: {
+                    title: data.result.title || "Instagram Media",
+                    thumbnail: data.result.thumbnail || null,
+                    links
+                }
+            };
+        }
+    } catch (_) {}
+
+    // API 2 (old v1) – fallback
     try {
         const { data } = await axios.get(
             `https://api.nexray.eu.cc/downloader/instagram?url=${encodedUrl}`,
@@ -112,7 +143,7 @@ async function instagramDownload(url) {
         if (data.status && Array.isArray(data.result) && data.result.length > 0) {
             const links = data.result.map(item => ({
                 quality: item.type === "video" ? "HD" : "Original",
-                type: item.type,       // "video" অথবা "image"
+                type: item.type,       // "video" or "image"
                 thumbnail: item.thumbnail || null,
                 url: item.url
             }));
@@ -130,7 +161,99 @@ async function instagramDownload(url) {
         }
     } catch (_) {}
 
-    throw new Error("Instagram API ফেল করেছে। URL টি সঠিক কিনা চেক করুন।");
+    throw new Error("All Instagram APIs failed. Please check the URL.");
+}
+
+// ─────────────────────────────────────────────
+// TikTok Downloader (2 fallback APIs: nexray → faa)
+// ─────────────────────────────────────────────
+async function tiktokDownload(url) {
+    const encodedUrl = encodeURIComponent(url);
+
+    // API 1: api.nexray.eu.cc
+    try {
+        const { data } = await axios.get(
+            `https://api.nexray.eu.cc/downloader/tiktok?url=${encodedUrl}`,
+            { timeout: 10000 }
+        );
+
+        if (data.status && data.result) {
+            const r = data.result;
+            // Build links array (video without watermark is preferred)
+            const links = [];
+            if (r.data) {
+                links.push({ quality: "No Watermark", type: "video", url: r.data });
+            }
+            if (r.alternatives?.nowm) {
+                links.push({ quality: "No Watermark (alt)", type: "video", url: r.alternatives.nowm });
+            }
+            if (r.alternatives?.wm) {
+                links.push({ quality: "With Watermark", type: "video", url: r.alternatives.wm });
+            }
+            if (r.music_info?.url) {
+                links.push({ quality: "Audio", type: "audio", url: r.music_info.url });
+            }
+
+            return {
+                status: true,
+                creator: "Adi.0X",
+                platform: "tiktok",
+                data: {
+                    title: r.title || "TikTok Video",
+                    thumbnail: r.cover || null,
+                    links: links,
+                    meta: {
+                        author: r.author?.nickname || r.author?.username || null,
+                        stats: r.stats || null,
+                        duration: r.duration || null
+                    }
+                }
+            };
+        }
+    } catch (_) {}
+
+    // API 2: api-faa.my.id (fallback)
+    try {
+        const { data } = await axios.get(
+            `https://api-faa.my.id/faa/tiktok?url=${encodedUrl}`,
+            { timeout: 10000 }
+        );
+
+        if (data.status && data.result) {
+            const r = data.result;
+            const links = [];
+            if (r.data) {
+                links.push({ quality: "No Watermark", type: "video", url: r.data });
+            }
+            if (r.alternatives?.nowm) {
+                links.push({ quality: "No Watermark (alt)", type: "video", url: r.alternatives.nowm });
+            }
+            if (r.alternatives?.wm) {
+                links.push({ quality: "With Watermark", type: "video", url: r.alternatives.wm });
+            }
+            if (r.music_info?.url) {
+                links.push({ quality: "Audio", type: "audio", url: r.music_info.url });
+            }
+
+            return {
+                status: true,
+                creator: "Adi.0X",
+                platform: "tiktok",
+                data: {
+                    title: r.title || "TikTok Video",
+                    thumbnail: r.cover || null,
+                    links: links,
+                    meta: {
+                        author: r.author?.nickname || r.author?.username || null,
+                        stats: r.stats || null,
+                        duration: r.duration || null
+                    }
+                }
+            };
+        }
+    } catch (_) {}
+
+    throw new Error("All TikTok APIs failed. Please check the URL.");
 }
 
 // ─────────────────────────────────────────────
@@ -142,14 +265,14 @@ router.get("/", (req, res) => {
         status: true,
         message: "Universal Media Downloader by Adi.0X",
         base_url: base,
-        supported_platforms: ["facebook", "instagram"],
+        supported_platforms: ["facebook", "instagram", "tiktok"],
         endpoints: [
             {
-                name: "Universal Download",
+                name: "Universal Download (auto-detect)",
                 method: "GET",
-                endpoint: "/",
-                params: [{ name: "url", type: "string", required: true, description: "যেকোনো সাপোর্টেড প্ল্যাটফর্মের URL" }],
-                example: `${base}?url=https://www.facebook.com/share/v/1DmqBWjF4s/`
+                endpoint: "/download",
+                params: [{ name: "url", type: "string", required: true, description: "URL of supported platform (Facebook, Instagram, TikTok)" }],
+                example: `${base}/download?url=https://www.tiktok.com/@user/video/123456789`
             },
             {
                 name: "Facebook Download",
@@ -164,20 +287,27 @@ router.get("/", (req, res) => {
                 endpoint: "/instagram",
                 params: [{ name: "url", type: "string", required: true, description: "Instagram reel/post URL" }],
                 example: `${base}/instagram?url=https://www.instagram.com/reel/DY-ZlxZTVtV/`
+            },
+            {
+                name: "TikTok Download",
+                method: "GET",
+                endpoint: "/tiktok",
+                params: [{ name: "url", type: "string", required: true, description: "TikTok video URL" }],
+                example: `${base}/tiktok?url=https://vm.tiktok.com/ZS92f2s9A/`
             }
         ]
     });
 });
 
 // ─────────────────────────────────────────────
-// GET /api/dl?url=  (অটো ডিটেক্ট)
+// GET /api/dl/download?url=  (auto detect)
 // ─────────────────────────────────────────────
 router.get("/download", async (req, res) => {
     const url = req.query.url;
     if (!url) {
         return res.status(400).json({
             status: false,
-            message: "URL প্যারামিটার দরকার। Example: /api/dl/download?url=https://..."
+            message: "URL parameter is required. Example: /api/dl/download?url=https://..."
         });
     }
 
@@ -185,7 +315,7 @@ router.get("/download", async (req, res) => {
     if (!platform) {
         return res.status(400).json({
             status: false,
-            message: "সাপোর্টেড প্ল্যাটফর্ম নয়। এখন সাপোর্ট করে: facebook, instagram"
+            message: "Unsupported platform. Currently supports: facebook, instagram, tiktok"
         });
     }
 
@@ -193,6 +323,7 @@ router.get("/download", async (req, res) => {
         let result;
         if (platform === "facebook") result = await facebookDownload(url);
         else if (platform === "instagram") result = await instagramDownload(url);
+        else if (platform === "tiktok") result = await tiktokDownload(url);
 
         return res.json(result);
     } catch (err) {
@@ -212,7 +343,7 @@ router.get("/facebook", async (req, res) => {
     if (!url) {
         return res.status(400).json({
             status: false,
-            message: "URL প্যারামিটার দরকার। Example: /api/dl/facebook?url=https://..."
+            message: "URL parameter is required. Example: /api/dl/facebook?url=https://..."
         });
     }
 
@@ -236,7 +367,7 @@ router.get("/instagram", async (req, res) => {
     if (!url) {
         return res.status(400).json({
             status: false,
-            message: "URL প্যারামিটার দরকার। Example: /api/dl/instagram?url=https://..."
+            message: "URL parameter is required. Example: /api/dl/instagram?url=https://..."
         });
     }
 
@@ -247,6 +378,30 @@ router.get("/instagram", async (req, res) => {
         return res.status(500).json({
             status: false,
             platform: "instagram",
+            message: err.message
+        });
+    }
+});
+
+// ─────────────────────────────────────────────
+// GET /api/dl/tiktok?url=
+// ─────────────────────────────────────────────
+router.get("/tiktok", async (req, res) => {
+    const url = req.query.url;
+    if (!url) {
+        return res.status(400).json({
+            status: false,
+            message: "URL parameter is required. Example: /api/dl/tiktok?url=https://..."
+        });
+    }
+
+    try {
+        const result = await tiktokDownload(url);
+        return res.json(result);
+    } catch (err) {
+        return res.status(500).json({
+            status: false,
+            platform: "tiktok",
             message: err.message
         });
     }
