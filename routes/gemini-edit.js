@@ -35,7 +35,7 @@ router.get("/edit", async (req, res) => {
 
         const response = await axios.get(finalUrl, {
             responseType: "stream",
-            timeout: 30000,
+            timeout: 0,
             headers: {
                 "User-Agent": "Mozilla/5.0"
             }
