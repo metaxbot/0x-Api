@@ -38,7 +38,7 @@ router.get("/edit", async (req, res) => {
         const safePrompt = encodeURIComponent(prompt);
 
         const apiUrl =
-            `https://api-faa.my.id/faa/editfoto?url=${safeUrl}&prompt=${safePrompt}`;
+            `https://ancient-shadow-466c.sakibbaboxod.workers.dev/?url=https://api-faa.my.id/faa/editfoto?url=${safeUrl}&prompt=${safePrompt}`;
 
         const response = await fetchAsStream(apiUrl);
 
