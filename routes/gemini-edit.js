@@ -3,70 +3,63 @@ const router = express.Router();
 const axios = require("axios");
 
 // ─────────────────────────────────────────────
-// Helper: safe fetch proxy (stream safe)
+// YOUR PROXY BASE
 // ─────────────────────────────────────────────
-async function fetchAsStream(targetUrl) {
-    return await axios.get(targetUrl, {
-        responseType: "stream",
-        timeout: 30000,
-        headers: {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "*/*",
-            "Referer": targetUrl
-        },
-        maxRedirects: 5
-    });
-}
+const PROXY_BASE =
+  "https://ancient-shadow-466c.sakibbaboxod.workers.dev/?url=";
 
 // ─────────────────────────────────────────────
 // GET /api/gemini/edit
 // ─────────────────────────────────────────────
 router.get("/edit", async (req, res) => {
-    let { url, prompt } = req.query;
+    const { url, prompt } = req.query;
 
     if (!url || !prompt) {
         return res.status(400).json({
             status: false,
             message: "URL and prompt required.",
-            example: "/api/gemini/edit?url=https://example.com/photo.jpg&prompt=make+it+realistic"
+            example:
+                "/api/gemini/edit?url=https://example.com/photo.jpg&prompt=make+it+realistic"
         });
     }
 
     try {
-        // 🔥 FIX: always encode safely (nested URL safe)
-        const safeUrl = encodeURIComponent(url);
-        const safePrompt = encodeURIComponent(prompt);
-
+        // FAA API URL
         const apiUrl =
-            `https://ancient-shadow-466c.sakibbaboxod.workers.dev/?url=https://api-faa.my.id/faa/editfoto?url=${safeUrl}&prompt=${safePrompt}`;
+            `https://api-faa.my.id/faa/editfoto` +
+            `?url=${encodeURIComponent(url)}` +
+            `&prompt=${encodeURIComponent(prompt)}`;
 
-        const response = await fetchAsStream(apiUrl);
+        // 🔥 PROXY WRAP HERE
+        const finalUrl = PROXY_BASE + encodeURIComponent(apiUrl);
 
-        const contentType =
-            response.headers["content-type"] || "image/jpeg";
+        const response = await axios.get(finalUrl, {
+            responseType: "stream",
+            timeout: 30000,
+            headers: {
+                "User-Agent": "Mozilla/5.0"
+            }
+        });
+
+        const contentType = response.headers["content-type"] || "image/jpeg";
 
         res.setHeader("Content-Type", contentType);
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Access-Control-Allow-Origin", "*");
 
-        // 🔥 STREAM DIRECT (NO BUFFER = NO CORRUPTION)
         response.data.pipe(res);
 
     } catch (err) {
-        console.error("Edit API error:", err.message);
-
-        if (!res.headersSent) {
-            return res.status(500).json({
-                status: false,
-                message: "Could not edit image.",
-                error: err.message
-            });
-        }
+        return res.status(500).json({
+            status: false,
+            message: "Could not edit image.",
+            error: err.message
+        });
     }
 });
 
 // ─────────────────────────────────────────────
-// API INFO
+// INFO ROUTE
 // ─────────────────────────────────────────────
 router.get("/", (req, res) => {
     const base = `${req.protocol}://${req.get("host")}/api/gemini`;
@@ -77,14 +70,9 @@ router.get("/", (req, res) => {
         endpoints: [
             {
                 name: "Image Edit",
-                method: "GET",
                 endpoint: "/edit",
-                params: [
-                    { name: "url", type: "string", required: true },
-                    { name: "prompt", type: "string", required: true }
-                ],
-                response: "Direct image (stream)",
-                example: `${base}/edit?url=https://example.com/photo.jpg&prompt=make+it+realistic`
+                example:
+                    `${base}/edit?url=https://example.com/photo.jpg&prompt=make+it+realistic`
             }
         ]
     });
