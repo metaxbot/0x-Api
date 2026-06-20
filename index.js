@@ -18,6 +18,7 @@ app.use("/api/ytmusic", require("./routes/ytmusic-search"));
 app.use("/api/fb", require("./routes/fb-inf"));
 app.use("/api/sounds", require("./routes/sounds"));
 app.use("/api/dl", require("./routes/download"));
+app.use("/api/gemini", require("./routes/gemini-edit"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
