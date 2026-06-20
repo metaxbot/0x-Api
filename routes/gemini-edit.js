@@ -3,10 +3,26 @@ const router = express.Router();
 const axios = require("axios");
 
 // ─────────────────────────────────────────────
-// GET /api/gemini/edit?url=&prompt=
+// Helper: safe fetch proxy (stream safe)
+// ─────────────────────────────────────────────
+async function fetchAsStream(targetUrl) {
+    return await axios.get(targetUrl, {
+        responseType: "stream",
+        timeout: 30000,
+        headers: {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "*/*",
+            "Referer": targetUrl
+        },
+        maxRedirects: 5
+    });
+}
+
+// ─────────────────────────────────────────────
+// GET /api/gemini/edit
 // ─────────────────────────────────────────────
 router.get("/edit", async (req, res) => {
-    const { url, prompt } = req.query;
+    let { url, prompt } = req.query;
 
     if (!url || !prompt) {
         return res.status(400).json({
@@ -17,23 +33,28 @@ router.get("/edit", async (req, res) => {
     }
 
     try {
-        const apiUrl = `https://api-faa.my.id/faa/editfoto?url=${encodeURIComponent(url)}&prompt=${encodeURIComponent(prompt)}`;
+        // 🔥 FIX: always encode safely (nested URL safe)
+        const safeUrl = encodeURIComponent(url);
+        const safePrompt = encodeURIComponent(prompt);
 
-        const response = await axios.get(apiUrl, {
-            responseType: "stream",
-            timeout: 30000,
-            headers: {
-                "User-Agent": "Mozilla/5.0"
-            }
-        });
+        const apiUrl =
+            `https://api-faa.my.id/faa/editfoto?url=${safeUrl}&prompt=${safePrompt}`;
 
-        const contentType = response.headers["content-type"] || "image/png";
+        const response = await fetchAsStream(apiUrl);
+
+        const contentType =
+            response.headers["content-type"] || "image/jpeg";
+
         res.setHeader("Content-Type", contentType);
         res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Access-Control-Allow-Origin", "*");
 
+        // 🔥 STREAM DIRECT (NO BUFFER = NO CORRUPTION)
         response.data.pipe(res);
 
     } catch (err) {
+        console.error("Edit API error:", err.message);
+
         if (!res.headersSent) {
             return res.status(500).json({
                 status: false,
@@ -45,23 +66,24 @@ router.get("/edit", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// GET /api/gemini — Info
+// API INFO
 // ─────────────────────────────────────────────
 router.get("/", (req, res) => {
     const base = `${req.protocol}://${req.get("host")}/api/gemini`;
+
     res.json({
         status: true,
-        message: "Gemini Image Tools by Adi.0X",
+        message: "Gemini Image Tools by Adi.0X (Proxy Enabled)",
         endpoints: [
             {
                 name: "Image Edit",
                 method: "GET",
                 endpoint: "/edit",
                 params: [
-                    { name: "url",    type: "string", required: true, description: "এডিট করার ছবির direct URL" },
-                    { name: "prompt", type: "string", required: true, description: "কীভাবে এডিট করবে" }
+                    { name: "url", type: "string", required: true },
+                    { name: "prompt", type: "string", required: true }
                 ],
-                response: "Direct image (binary)",
+                response: "Direct image (stream)",
                 example: `${base}/edit?url=https://example.com/photo.jpg&prompt=make+it+realistic`
             }
         ]
@@ -69,4 +91,3 @@ router.get("/", (req, res) => {
 });
 
 module.exports = router;
-
