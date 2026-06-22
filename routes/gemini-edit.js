@@ -1,12 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const axios = require("axios");
-
-// ─────────────────────────────────────────────
-// YOUR PROXY BASE
-// ─────────────────────────────────────────────
-const PROXY_BASE =
-  "https://ancient-shadow-466c.sakibbaboxod.workers.dev/?url=";
+const FormData = require("form-data");
 
 // ─────────────────────────────────────────────
 // GET /api/gemini/edit
@@ -18,32 +13,25 @@ router.get("/edit", async (req, res) => {
         return res.status(400).json({
             status: false,
             message: "URL and prompt required.",
-            example:
-                "/api/gemini/edit?url=https://example.com/photo.jpg&prompt=make+it+realistic"
+            example: "/api/gemini/edit?url=https://example.com/photo.jpg&prompt=change+jersey"
         });
     }
 
     try {
-        // FAA API URL
-        const apiUrl =
-            `https://api-faa.my.id/faa/editfoto` +
-            `?url=${encodeURIComponent(url)}` +
-            `&prompt=${encodeURIComponent(prompt)}`;
+        const imageResponse = await axios.get(url, { responseType: 'stream' });
 
-        // 🔥 PROXY WRAP HERE
-        const finalUrl = PROXY_BASE + encodeURIComponent(apiUrl);
+        const form = new FormData();
+        form.append('image', imageResponse.data); 
+        form.append('param', prompt);
 
-        const response = await axios.get(finalUrl, {
-            responseType: "stream",
-            timeout: 0,
+        const response = await axios.post('https://api.nexray.eu.cc/ai/nanobanana', form, {
             headers: {
-                "User-Agent": "Mozilla/5.0"
-            }
+                ...form.getHeaders()
+            },
+            responseType: 'stream'
         });
 
-        const contentType = response.headers["content-type"] || "image/jpeg";
-
-        res.setHeader("Content-Type", contentType);
+        res.setHeader("Content-Type", response.headers["content-type"] || "image/jpeg");
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Access-Control-Allow-Origin", "*");
 
@@ -66,13 +54,12 @@ router.get("/", (req, res) => {
 
     res.json({
         status: true,
-        message: "Gemini Image Tools by Adi.0X (Proxy Enabled)",
+        message: "Gemini Image Tools (Updated)",
         endpoints: [
             {
                 name: "Image Edit",
                 endpoint: "/edit",
-                example:
-                    `${base}/edit?url=https://example.com/photo.jpg&prompt=make+it+realistic`
+                example: `${base}/edit?url=https://example.com/photo.jpg&prompt=change+jersey`
             }
         ]
     });
