@@ -17,19 +17,30 @@ router.get("/edit", async (req, res) => {
     }
 
     try {
-        const response = await axios.get("https://azadx69x-all-apis-top.vercel.app/api/editor", {
+        const apiRes = await axios.get("https://api.snowping.cfd/api/imageai/nanobanana", {
             params: {
                 url: url,
                 prompt: prompt
-            },
-            responseType: 'stream'
+            }
         });
 
-        res.setHeader("Content-Type", response.headers["content-type"] || "image/jpeg");
+        const imageUrl = apiRes.data?.result?.image;
+
+        if (!imageUrl) {
+            return res.status(500).json({
+                status: false,
+                message: "Failed to generate image URL from API.",
+                details: apiRes.data
+            });
+        }
+
+        const imageStream = await axios.get(imageUrl, { responseType: 'stream' });
+
+        res.setHeader("Content-Type", imageStream.headers["content-type"] || "image/webp");
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Access-Control-Allow-Origin", "*");
 
-        response.data.pipe(res);
+        imageStream.data.pipe(res);
 
     } catch (err) {
         return res.status(500).json({
