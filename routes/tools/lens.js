@@ -107,7 +107,10 @@ router.get("/", async (req, res) => {
             headers: {
                 "User-Agent": randomUA(),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9"
+                "Accept-Language": "en-US,en;q=0.9",
+                // Bypass Google's cookie-consent interstitial, which otherwise
+                // returns a "before you continue" page with zero results.
+                "Cookie": "CONSENT=YES+cb.20240101-00-p0.en+FX+000; SOCS=CAI"
             },
             validateStatus: () => true
         });
@@ -133,14 +136,28 @@ router.get("/", async (req, res) => {
             if (found.length > bestMatches.length) bestMatches = found;
         }
 
-        return res.json({
+        const result = {
             status: true,
             creator: "Adi.0X",
             image_url: imageUrl,
             search_url: searchUrl,
             total_matches: bestMatches.length,
             matches: bestMatches
-        });
+        };
+
+        // Temporary diagnostics: /api/tools/lens?url=...&debug=true
+        // Helps figure out why matches may be empty without needing server console access.
+        if (req.query.debug === "true") {
+            result.debug = {
+                html_length: html.length,
+                blob_count: blobs.length,
+                gstatic_thumb_count: (html.match(/encrypted-tbn\d*\.gstatic\.com/g) || []).length,
+                looks_like_consent_page: /consent\.google\.com|before you continue/i.test(html),
+                html_sample: html.slice(0, 1500)
+            };
+        }
+
+        return res.json(result);
 
     } catch (err) {
         return res.status(500).json({
