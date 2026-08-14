@@ -1,8 +1,14 @@
 const express = require("express");
 const router = express.Router();
 const axios = require("axios");
+const cheerio = require("cheerio");
 
-const LENS_UPLOAD_API = "https://lens.google.com/uploadbyurl?url=";
+// Classic Google "search by image" endpoint. Unlike the newer
+// lens.google.com / google.com/search?udm=26 flow (which requires real
+// JS execution and blocks plain HTTP clients behind an "enable JS"
+// interstitial — confirmed by live testing), this older endpoint still
+// renders a server-side HTML page we can scrape without a browser.
+const SEARCHBYIMAGE_API = "https://www.google.com/searchbyimage?image_url=";
 
 const USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -99,7 +105,7 @@ router.get("/", async (req, res) => {
     }
 
     try {
-        const target = `${LENS_UPLOAD_API}${encodeURIComponent(imageUrl)}`;
+        const target = `${SEARCHBYIMAGE_API}${encodeURIComponent(imageUrl)}&sbisrc=cr_1_5_2`;
 
         const response = await axios.get(target, {
             timeout: 20000,
@@ -108,8 +114,6 @@ router.get("/", async (req, res) => {
                 "User-Agent": randomUA(),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.9",
-                // Bypass Google's cookie-consent interstitial, which otherwise
-                // returns a "before you continue" page with zero results.
                 "Cookie": "CONSENT=YES+cb.20240101-00-p0.en+FX+000; SOCS=CAI"
             },
             validateStatus: () => true
@@ -124,11 +128,23 @@ router.get("/", async (req, res) => {
         if (typeof html !== "string" || html.length === 0) {
             return res.status(502).json({
                 status: false,
-                message: "Empty response from Google Lens. Please check the image URL."
+                message: "Empty response from Google. Please check the image URL."
             });
         }
 
-        // Find the richest data blob (most gstatic thumbnails = visual matches blob)
+        const $ = cheerio.load(html);
+
+        // "Best guess for this image" label, when Google shows one
+        let bestGuess = null;
+        $("a, div, span").each((_, el) => {
+            const t = $(el).text().trim();
+            if (/^(Best guess for this image:|Results for)/i.test(t)) {
+                bestGuess = t.replace(/^(Best guess for this image:|Results for)\s*/i, "").trim();
+                return false;
+            }
+        });
+
+        // Visually similar images block (if server-rendered on this page)
         const blobs = extractDataBlobs(html);
         let bestMatches = [];
         for (const blob of blobs) {
@@ -140,13 +156,12 @@ router.get("/", async (req, res) => {
             status: true,
             creator: "Adi.0X",
             image_url: imageUrl,
+            best_guess: bestGuess,
             search_url: searchUrl,
             total_matches: bestMatches.length,
             matches: bestMatches
         };
 
-        // Temporary diagnostics: /api/tools/lens?url=...&debug=true
-        // Helps figure out why matches may be empty without needing server console access.
         if (req.query.debug === "true") {
             result.debug = {
                 html_length: html.length,
