@@ -20,6 +20,7 @@ app.use("/api/sounds", require("./routes/sounds"));
 app.use("/api/dl", require("./routes/download"));
 app.use("/api/vdl", require("./routes/videodl"));
 app.use("/api/gemini", require("./routes/gemini-edit"));
+app.use("/api/tools/lens", require("./routes/tools/lens"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
